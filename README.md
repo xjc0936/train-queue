@@ -168,6 +168,35 @@ python3 /data/xjc/train-queue/queue_cli.py process-control 完整进程身份 ki
 
 技术依据：[Linux /proc 官方文档](https://www.kernel.org/doc/html/latest/filesystems/proc.html)、[Python pidfd 信号接口](https://docs.python.org/3/library/signal.html#signal.pidfd_send_signal)。
 
+## 验证日志与模型修复性能
+
+每条队列任务和已有训练都有“验证指标”入口。监控器从训练输出中的验证记录自动提取 PSNR、SSIM、L1、LPIPS、MSE 等指标，并显示：
+
+- 最新验证值、各指标独立的历史最优值及对应 step / epoch。
+- PSNR 最优那次验证对应的 SSIM、L1，避免把不同次验证的独立最优拼成一次结果。
+- 验证趋势图、最近 200 次验证表格和原始验证日志，均可查看日志文件来源。
+- 不同验证集、训练阶段、NFE 和权重来源分别统计。`by_nfe` 的 NFE=1 / NFE=5 结果分组展示。
+
+PSNR / SSIM 越高越优，L1 / L2 / LPIPS / MAE / MSE / RMSE / 验证 loss / FID 越低越优。指标数值来自现有日志，不会触发新的验证或读取模型 checkpoint。界面中的“最优”是**指标对应的最优观测记录**，不保证训练代码为它保存了 checkpoint。
+
+支持 JSON 行格式（`val_psnr`、`val_ssim`、`by_nfe`、嵌套 `validation` / `metrics` 等）以及常见文本验证行和 `Validation NAME` 后的多行指标。训练 loss 和未标注为验证的普通训练 PSNR 不会作为验证最优。未能自动区分验证集或口径时，请使用独立验证日志，避免把不同实验的结果混在同一日志中。
+
+验证输出保存在其他文件时，打开“验证指标”→“关联独立验证日志”，填写当前用户拥有的验证文件路径。留空可恢复从训练输出自动识别。显式关联的验证文件也支持不带 `val_` 前缀的 `psnr`、`ssim` 等字段。
+
+最优值按所选日志从头增量扫描，缓存保存在 `.data/validation-cache.json`。趋势与列表保留最近 200 次，较早的最优值仍会保留；重启服务后缓存继续使用。大日志每次最多扫描 4 MiB，扫描未完成时界面会标记“历史扫描中”，此时最优值仅覆盖已扫描范围。日志被截断或轮转时会重新索引当前文件；已经删除或无法读取的旧日志不在统计范围内。
+
+命令行也支持查询和关联：
+
+```bash
+# 队列任务
+python3 /data/xjc/train-queue/queue_cli.py validation 1
+python3 /data/xjc/train-queue/queue_cli.py bind-task-validation 1 /path/to/validation.jsonl
+
+# 从其他终端启动的已有训练，身份取自 processes 输出
+python3 /data/xjc/train-queue/queue_cli.py process-validation 完整进程身份
+python3 /data/xjc/train-queue/queue_cli.py bind-validation 完整进程身份 /path/to/validation.jsonl
+```
+
 ## 调度规则
 
 - **严格顺序，一次一个任务**。队首等待 GPU 时，后面的任务也等待。需要优先执行另一项时可以“置顶”。

@@ -17,6 +17,7 @@ import threading
 import time
 
 from worker import atomic_json
+from validation_metrics import ValidationIndex
 
 
 def kernel_call(number, *args):
@@ -199,6 +200,7 @@ class ProcessMonitor:
         self.requests = {}
         self.cached = {}
         self.cached_excluded = None
+        self.validation_index = ValidationIndex(data_dir)
 
     def read(self, pid):
         try:
@@ -388,6 +390,9 @@ class ProcessMonitor:
             log_error = None
         except (OSError,ValueError) as exc:
             log, progress, log_error = {}, parse_progress(''), str(exc)
+        explicit_validation=self.bindings.get(process['identity'],{}).get('validation_path')
+        validation_path=explicit_validation or log.get('path')
+        validation=self.validation_index.summary(validation_path,dedicated=True if explicit_validation else None) if is_training else None
         return dict(identity=process['identity'],pid=process['pid'],ppid=process['ppid'],
                     command=process['command'],cwd=process['cwd'],is_training=is_training,
                     status='paused' if all(p['state'] in ('T','t') for p in members) else self.requests.get(process['identity'],'running'),
@@ -397,7 +402,24 @@ class ProcessMonitor:
                     rss_mb=round(sum(p['rss_mb'] for p in members),1),
                     cpu_percent=round(sum(p['cpu_percent'] or 0 for p in members),1) if any(p['cpu_percent'] is not None for p in members) else None,
                     gpus=gpus,log_path=log.get('path'),log_source=source,log_error=log_error,
-                    log_modified_at=log.get('modified_at'),progress=progress)
+                    log_modified_at=log.get('modified_at'),progress=progress,validation=validation)
+
+    def validation(self, identity, excluded=()):
+        with self.lock:
+            try:
+                process,processes=self.validate(identity,excluded)
+                members=[processes[i] for i in self.descendants(process['pid'],processes) if i in processes]
+                path,_=self.find_log(process,members)
+                if path:
+                    path=self.read_log(path,limit=1).get('path')
+            except ValueError:
+                previous=self.known.get(identity)
+                if not previous or previous.get('status')!='exited':
+                    raise
+                path=previous.get('log_path')
+            explicit_validation=self.bindings.get(identity,{}).get('validation_path')
+            path=explicit_validation or path
+            return self.validation_index.summary(path,history=True,dedicated=True if explicit_validation else None)
 
     def logs(self, identity, offset=0, excluded=()):
         with self.lock:
@@ -415,10 +437,10 @@ class ProcessMonitor:
             except OSError as exc:
                 raise ValueError(f'日志不可读取：{exc}')
 
-    def bind(self, identity, path=None, excluded=()):
+    def bind(self, identity, path=None, excluded=(), validation_path=None):
         with self.lock:
             self.validate(identity,excluded)
-            value = {'tracked':True}
+            value = {**self.bindings.get(identity,{}),'tracked':True}
             if path:
                 path = str(Path(path).expanduser().resolve())
                 try:
@@ -426,6 +448,16 @@ class ProcessMonitor:
                 except OSError as exc:
                     raise ValueError(f'日志文件不可读取：{exc}')
                 value['log_path'] = path
+            if validation_path is not None:
+                if validation_path:
+                    validation_path=str(Path(validation_path).expanduser().resolve())
+                    try:
+                        self.regular_file(validation_path)
+                    except OSError as exc:
+                        raise ValueError(f'验证日志不可读取：{exc}')
+                    value['validation_path']=validation_path
+                else:
+                    value.pop('validation_path',None)
             self.bindings[identity] = value
             atomic_json(self.storage,self.bindings)
             self.last_scan = 0

@@ -70,6 +70,17 @@ python3 /data/xjc/train-queue/queue_cli.py process-control 完整进程身份 ki
 
 服务尚未启动时，可用 `python3 /data/xjc/train-queue/process_monitor.py` 只读检查当前训练。服务和训练需要处于同一进程可见空间，不能在隔离沙箱中查看宿主机任务。
 
+## 查看验证性能与历史最优
+
+```bash
+python3 /data/xjc/train-queue/queue_cli.py validation 队列任务编号
+python3 /data/xjc/train-queue/queue_cli.py process-validation 完整进程身份
+python3 /data/xjc/train-queue/queue_cli.py bind-task-validation 队列任务编号 /绝对路径/validation.jsonl
+python3 /data/xjc/train-queue/queue_cli.py bind-validation 完整进程身份 /绝对路径/validation.jsonl
+```
+
+输出包含最新值、各指标独立的历史最优值、对应 step / epoch、同次验证的其他指标、最近 200 次历史和原始验证记录。PSNR / SSIM 取最大，L1 / LPIPS 等误差指标取最小。不同验证集、阶段和 NFE 分组，不能将它们混成一个全局最优。缓存会从日志开头增量索引；`scanning=true` 表示完整历史尚未扫描完，报告最优值时应说明这个范围限制。不要将各指标独立最优描述为同一个 checkpoint 的成绩；也不要仅凭指标记录声称 checkpoint 文件一定存在。
+
 ## 运行约定
 
 - 所有命令返回 JSON；失败时退出码非零，错误 JSON 写入标准错误。

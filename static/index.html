@@ -7,6 +7,7 @@
   <meta name="color-scheme" content="dark">
   <title>Train Queue · 训练工作台</title>
   <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/validation.css">
   <script src="/app.js" defer></script>
 </head>
 <body>
@@ -44,7 +45,8 @@
   </section>
 </main>
 <dialog id="log-dialog"><div class="dialog-header"><div><h2 id="log-title">任务日志</h2><span id="log-meta" class="muted"></span></div><button id="close-log" class="icon-button" aria-label="关闭日志">×</button></div><pre id="log-output" tabindex="0"></pre><div class="log-footer"><label><input id="auto-scroll" type="checkbox" checked> 自动滚动</label><span>每秒更新 · 保留最近 256 KiB</span><button id="copy-log" class="secondary">复制日志</button></div></dialog>
-<dialog id="bind-dialog"><form id="bind-form"><div class="dialog-header"><h2>关联已有日志文件</h2><button id="close-bind" type="button" class="icon-button" aria-label="关闭">×</button></div><div class="bind-content"><p>填写这次训练正在写入的日志路径。关联后自动识别 epoch、step、loss 等输出。</p><label for="bind-path">服务器上的绝对路径</label><input id="bind-path" type="text" placeholder="/data/xjc/项目/outputs/train.log" required><p id="bind-error" class="form-error" role="alert" hidden></p><button type="submit" class="primary">关联日志</button></div></form></dialog>
+<dialog id="bind-dialog"><form id="bind-form"><div class="dialog-header"><h2 id="bind-title">关联已有日志文件</h2><button id="close-bind" type="button" class="icon-button" aria-label="关闭">×</button></div><div class="bind-content"><p id="bind-description">填写这次训练正在写入的日志路径。</p><label for="bind-path">服务器上的绝对路径</label><input id="bind-path" type="text" placeholder="/data/xjc/项目/outputs/train.log"><p id="bind-error" class="form-error" role="alert" hidden></p><button type="submit" class="primary">保存关联</button></div></form></dialog>
+<dialog id="validation-dialog"><div class="dialog-header"><div><h2 id="validation-title">验证性能</h2><span id="validation-note" class="muted"></span></div><button id="close-validation" class="icon-button" aria-label="关闭验证指标">×</button></div><div class="validation-body"><div class="validation-toolbar"><label>验证分组 <select id="validation-group"></select></label><label>趋势指标 <select id="validation-metric"></select></label><button id="bind-validation" class="secondary">关联独立验证日志</button></div><div id="validation-overview"></div><div id="validation-chart"></div><div id="validation-history" class="validation-history"></div><details class="raw-validation"><summary>原始验证日志（最近 200 条）</summary><pre id="validation-raw"></pre></details><p id="validation-source" class="muted"></p></div></dialog>
 <div id="toast" class="toast" role="status" hidden></div>
 </body>
 </html>

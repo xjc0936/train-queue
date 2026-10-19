@@ -105,6 +105,7 @@ class Queue:
             finished_at REAL, exit_code INTEGER, pid INTEGER, process_start TEXT,
             note TEXT NOT NULL DEFAULT '', position INTEGER NOT NULL);
           CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+          CREATE TABLE IF NOT EXISTS task_validation_logs (task_id INTEGER PRIMARY KEY, path TEXT NOT NULL);
           INSERT OR IGNORE INTO settings VALUES ('paused', 'false');
           INSERT OR IGNORE INTO settings VALUES ('stop_on_failure', 'false');
         ''')
@@ -193,9 +194,36 @@ class Queue:
             for task in tasks:
                 task['assigned'] = json.loads(task['assigned'])
                 task.pop('process_start', None)
+                task['validation']=self.task_validation(task['id'])
             return dict(tasks=tasks, settings=self.settings(), gpus=self.gpus,
                         gpu_error=self.gpu_error, scheduler_error=self.scheduler_error,
                         default_cwd=self.default_cwd)
+
+    def task_validation(self, task_id, history=False):
+        with self.lock:
+            if not self.db.execute('SELECT 1 FROM tasks WHERE id=?',(task_id,)).fetchone():
+                raise ValueError('任务不存在')
+            row=self.db.execute('SELECT path FROM task_validation_logs WHERE task_id=?',(task_id,)).fetchone()
+            path=row['path'] if row else self.task_dir(task_id)/'output.log'
+            if not row and not Path(path).exists():
+                path=None
+        return self.process_monitor.validation_index.summary(path,history=history,dedicated=True if row else None)
+
+    def bind_task_validation(self, task_id, path):
+        self.task_validation(task_id)
+        if not isinstance(path,str):
+            raise ValueError('日志路径必须为字符串，留空可恢复自动识别')
+        with self.lock,self.db:
+            if path:
+                path=str(Path(path).expanduser().resolve())
+                try:
+                    self.process_monitor.regular_file(path)
+                except OSError as exc:
+                    raise ValueError(f'验证日志不可读取：{exc}')
+                self.db.execute('INSERT OR REPLACE INTO task_validation_logs VALUES (?,?)',(task_id,path))
+            else:
+                self.db.execute('DELETE FROM task_validation_logs WHERE task_id=?',(task_id,))
+        return {'ok':True}
 
     def log(self, task_id, offset=0):
         if offset < 0:
@@ -373,7 +401,7 @@ def make_handler(queue, port):
                 if url.path == '/':
                     page = (ROOT / 'static/index.html').read_text().replace('__QUEUE_TOKEN__', token)
                     self.send(page.encode(), content_type='text/html; charset=utf-8')
-                elif url.path in ('/style.css', '/app.js'):
+                elif url.path in ('/style.css', '/validation.css', '/app.js'):
                     self.send((ROOT / 'static' / url.path[1:]).read_bytes(), content_type=(
                         'text/css; charset=utf-8' if url.path.endswith('.css') else 'text/javascript; charset=utf-8'))
                 elif url.path == '/api/state':
@@ -385,6 +413,10 @@ def make_handler(queue, port):
                     identity = url.path.split('/')[3]
                     offset = int(parse_qs(url.query).get('offset',['0'])[0])
                     self.send(queue.process_monitor.logs(identity,offset,queue.external_scope()))
+                elif re.fullmatch(r'/api/processes/[\w-]+/validation',url.path):
+                    self.send(queue.process_monitor.validation(url.path.split('/')[3],queue.external_scope()))
+                elif re.fullmatch(r'/api/tasks/\d+/validation',url.path):
+                    self.send(queue.task_validation(int(url.path.split('/')[3]),history=True))
                 elif re.fullmatch(r'/api/tasks/\d+/log', url.path):
                     task_id = int(url.path.split('/')[3])
                     offset = int(parse_qs(url.query).get('offset', ['0'])[0])
@@ -411,19 +443,24 @@ def make_handler(queue, port):
                 elif self.path == '/api/settings':
                     queue.update_settings(data)
                     self.send({'ok': True})
-                elif re.fullmatch(r'/api/processes/[\w-]+/(stop|kill|pause|resume|track|bind-log)',self.path):
+                elif re.fullmatch(r'/api/processes/[\w-]+/(stop|kill|pause|resume|track|bind-log|bind-validation)',self.path):
                     _,_,_,identity,action = self.path.split('/')
                     excluded = queue.external_scope()
-                    if action in ('track','bind-log'):
+                    if action in ('track','bind-log','bind-validation'):
                         path = data.get('path')
                         if action == 'bind-log' and (not isinstance(path,str) or not path.strip()):
                             raise ValueError('请填写已有日志文件的绝对路径')
-                        self.send(queue.process_monitor.bind(identity,path if action=='bind-log' else None,excluded))
+                        if action=='bind-validation' and not isinstance(path,str):
+                            raise ValueError('请填写验证日志路径，或留空恢复自动识别')
+                        self.send(queue.process_monitor.bind(identity,path if action=='bind-log' else None,excluded,
+                                  validation_path=path if action=='bind-validation' else None))
                     else:
                         self.send(queue.process_monitor.control(identity,action,excluded))
                 elif re.fullmatch(r'/api/tasks/\d+/(cancel|retry|top)', self.path):
                     _, _, _, task_id, action = self.path.split('/')
                     self.send({'id': queue.action(int(task_id), action)})
+                elif re.fullmatch(r'/api/tasks/\d+/bind-validation',self.path):
+                    self.send(queue.bind_task_validation(int(self.path.split('/')[3]),data.get('path')))
                 else:
                     self.send({'error': '接口不存在'}, 404)
             except (ValueError, TypeError) as exc:

@@ -73,6 +73,16 @@ def main(argv=None):
     bind_log = commands.add_parser('bind-log',help='为已有进程关联一个当前用户拥有的日志文件')
     bind_log.add_argument('identity')
     bind_log.add_argument('path')
+    validation = commands.add_parser('validation',help='查看队列任务的验证结果、历史最优及历史记录')
+    validation.add_argument('id',type=int)
+    process_validation = commands.add_parser('process-validation',help='查看已有训练的验证结果与历史最优')
+    process_validation.add_argument('identity')
+    bind_validation = commands.add_parser('bind-validation',help='给已有训练关联独立验证日志，空字符串恢复自动识别')
+    bind_validation.add_argument('identity')
+    bind_validation.add_argument('path')
+    bind_task_validation = commands.add_parser('bind-task-validation',help='给队列任务关联独立验证日志')
+    bind_task_validation.add_argument('id',type=int)
+    bind_task_validation.add_argument('path')
     args = parser.parse_args(argv)
     if not 1 <= args.port <= 65535:
         parser.error('端口必须在 1～65535 之间')
@@ -100,6 +110,14 @@ def main(argv=None):
             result = client.request(f'/api/processes/{args.identity}/bind-log',{'path':args.path})
         elif args.action == 'process-control':
             result = client.request(f'/api/processes/{args.identity}/{args.operation}',{})
+        elif args.action == 'validation':
+            result = client.request(f'/api/tasks/{args.id}/validation')
+        elif args.action == 'process-validation':
+            result = client.request(f'/api/processes/{args.identity}/validation')
+        elif args.action == 'bind-validation':
+            result = client.request(f'/api/processes/{args.identity}/bind-validation',{'path':args.path})
+        elif args.action == 'bind-task-validation':
+            result = client.request(f'/api/tasks/{args.id}/bind-validation',{'path':args.path})
         else:
             result = client.request(f'/api/tasks/{args.id}/{args.action}', {})
     except HTTPError as exc:

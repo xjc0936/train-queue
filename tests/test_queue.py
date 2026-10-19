@@ -254,6 +254,12 @@ class QueueTests(unittest.TestCase):
             error = call('add','--command','echo invalid','--gpu','not-a-gpu',success=False)
             self.assertIn('GPU',error['error'])
             self.assertEqual(len(self.queue.state()['tasks']),count)
+            validation=self.root/'scores.jsonl'
+            validation.write_text('{"step":50,"psnr":31.25,"ssim":0.92}\n')
+            call('bind-task-validation',str(retry['id']),str(validation))
+            metrics=call('validation',str(retry['id']))
+            self.assertEqual(metrics['groups'][0]['best']['psnr']['value'],31.25)
+            self.assertEqual(self.task(retry['id'])['validation']['groups'][0]['latest']['step'],50)
         finally:
             server.shutdown()
             server.server_close()
@@ -289,6 +295,13 @@ class QueueTests(unittest.TestCase):
             self.assertIn('Epoch',call('process-log',identity)['text'])
             call('bind-log',identity,str(log))
             self.assertEqual(next(p for p in client.request('/api/processes')['processes'] if p['identity']==identity)['log_source'],'manual')
+            validation=self.root/'scores.jsonl'
+            validation.write_text('{"step":100,"psnr":30,"ssim":0.91}\n{"step":200,"psnr":32,"ssim":0.93}\n')
+            call('bind-validation',identity,str(validation))
+            metrics=call('process-validation',identity)
+            self.assertEqual(metrics['groups'][0]['best']['psnr']['value'],32)
+            self.assertEqual(len(metrics['groups'][0]['history']),2)
+            self.assertIn('Epoch',call('process-log',identity)['text'])
             call('process-control',identity,'pause')
             self.assertEqual(next(p for p in client.request('/api/processes')['processes'] if p['pid']==child.pid)['status'],'paused')
             call('process-control',identity,'resume')
